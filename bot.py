@@ -7,6 +7,8 @@ from typing import Final, Optional
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
+import urllib.request
+import urllib.parse
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -29,6 +31,25 @@ def download_audio(url: str) -> str:
     temp_dir: str = tempfile.gettempdir()
     output_path: str = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
+    search_query = url
+    if is_spotify(url):
+        title = None
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                html = response.read(10000).decode("utf-8")
+                match = re.search(r"<title>(.*?)</title>", html)
+                if match:
+                    title = match.group(1).split(" | Spotify")[0].strip()
+        except Exception:
+            pass
+        
+        if title:
+            search_query = f"ytsearch:{title}"
+        else:
+            raise ValueError("No se pudo obtener informacion de Spotify")
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": output_path,
@@ -44,16 +65,16 @@ def download_audio(url: str) -> str:
         "nocheckcertificate": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["web_creator"]
+                "player_client": ["android", "web"]
             }
         },
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
         }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+        info = ydl.extract_info(search_query, download=True)
         if info is None:
             raise ValueError("No se pudo obtener informacion del link")
         if "entries" in info:
