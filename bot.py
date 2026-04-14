@@ -16,8 +16,8 @@ logger: Final[logging.Logger] = logging.getLogger(__name__)
 
 TOKEN: Final[Optional[str]] = os.environ.get("TELEGRAM_TOKEN")
 
-SPOTIFY_RE: Final[re.Pattern] = re.compile(r"https?://(open\.)?spotify\.com/track/[\w]+")
-YOUTUBE_RE: Final[re.Pattern] = re.compile(r"https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[\w\-]+")
+SPOTIFY_RE: Final[re.Pattern] = re.compile(r"https?://(?:open\.)?spotify\.com/(?:[a-zA-Z-]{2,10}/)?track/[\w]+")
+YOUTUBE_RE: Final[re.Pattern] = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w\-]+")
 
 def is_spotify(url: str) -> bool:
     return bool(SPOTIFY_RE.search(url))
@@ -39,6 +39,17 @@ def download_audio(url: str) -> str:
         }],
         "quiet": True,
         "no_warnings": True,
+        "noplaylist": True,
+        "noprogress": True,
+        "nocheckcertificate": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web_creator"]
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
