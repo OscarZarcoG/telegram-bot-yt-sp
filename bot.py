@@ -27,28 +27,23 @@ def is_spotify(url: str) -> bool:
 def is_youtube(url: str) -> bool:
     return bool(YOUTUBE_RE.search(url))
 
-def download_audio(url: str) -> str:
+def get_spotify_query(url: str) -> str:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read(20000).decode("utf-8")
+            match = re.search(r"<title>(.*?)</title>", html)
+            if match:
+                title = match.group(1).split(" | Spotify")[0].strip()
+                return f"ytsearch:{title}"
+    except Exception:
+        pass
+    raise ValueError("No se pudo obtener informacion de Spotify")
+
+def download_audio(query: str) -> str:
     temp_dir: str = tempfile.gettempdir()
     output_path: str = os.path.join(temp_dir, "%(title)s.%(ext)s")
-
-    search_query = url
-    if is_spotify(url):
-        title = None
-        try:
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=5) as response:
-                html = response.read(10000).decode("utf-8")
-                match = re.search(r"<title>(.*?)</title>", html)
-                if match:
-                    title = match.group(1).split(" | Spotify")[0].strip()
-        except Exception:
-            pass
-        
-        if title:
-            search_query = f"ytsearch:{title}"
-        else:
-            raise ValueError("No se pudo obtener informacion de Spotify")
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -74,7 +69,7 @@ def download_audio(url: str) -> str:
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(search_query, download=True)
+        info = ydl.extract_info(query, download=True)
         if info is None:
             raise ValueError("No se pudo obtener informacion del link")
         if "entries" in info:
@@ -93,6 +88,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode="Markdown"
     )
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None:
+        return
+    await update.message.reply_text(
+        "*Instrucciones*\n\n"
+        "1. Copia un link de YouTube o Spotify.\n"
+        "2. Pegalo en el chat.\n"
+        "3. Espera a que procese y descargue el audio.\n\n"
+        "Comandos:\n"
+        "/start - Iniciar el bot\n"
+        "/help - Ver mensajes de ayuda",
+        parse_mode="Markdown"
+    )
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or update.message.text is None:
         return
@@ -105,13 +114,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    msg = await update.message.reply_text("Descargando... un momento.")
+    msg = await update.message.reply_text("Procesando solicitud...")
+    loop = asyncio.get_event_loop()
 
     try:
-        loop = asyncio.get_event_loop()
-        filepath: str = await loop.run_in_executor(None, download_audio, url)
+        if is_spotify(url):
+            await msg.edit_text("Buscando informacion en Spotify...")
+            query = await loop.run_in_executor(None, get_spotify_query, url)
+        else:
+            query = url
 
-        await msg.edit_text("Subiendo el archivo...")
+        await msg.edit_text("Descargando audio de YouTube...")
+        filepath = await loop.run_in_executor(None, download_audio, query)
+
+        await msg.edit_text("Enviando archivo...")
 
         with open(filepath, "rb") as audio_file:
             await update.message.reply_audio(
@@ -123,22 +139,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         os.remove(filepath)
 
     except Exception as e:
-        logger.error(f"Error descargando {url}: {e}")
+        logger.error(f"Error procesando {url}: {e}")
         await msg.edit_text(
-            "No pude descargar ese link. Puede ser que:\n"
-            "- El video tenga restriccion de region\n"
-            "- El link de Spotify no tiene equivalente en YouTube\n"
-            "- Algo salio mal con el servidor\n\n"
-            "Intenta con otro link."
+            "Hubo un problema al procesar el link. Verifica que sea un enlace publico y valido."
         )
+
+async def post_init(application) -> None:
+    await application.bot.set_my_commands([
+        ("start", "Iniciar el bot"),
+        ("help", "Ver instrucciones"),
+    ])
 
 def main() -> None:
     if not TOKEN:
         raise ValueError("Falta la variable de entorno TELEGRAM_TOKEN")
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Bot corriendo...")
