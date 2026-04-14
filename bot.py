@@ -87,8 +87,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None:
         return
     await update.message.reply_text(
-        "*Bot de descargas para bajo*\n\n"
-        "Mandame un link de YouTube o Spotify y te mando el MP3 para que lo metas a Moises.\n\n"
+        "*Bot de descargas*\n\n"
+        "Mandame un link de YouTube o Spotify y te mando el MP3.\n\n"
         "Solo pega el link y listo.",
         parse_mode="Markdown"
     )
@@ -116,7 +116,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         with open(filepath, "rb") as audio_file:
             await update.message.reply_audio(
                 audio=audio_file,
-                caption="Aqui esta. Metelo a Moises.",
+                caption="Aqui esta.",
             )
 
         await msg.delete()
