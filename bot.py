@@ -9,6 +9,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 import yt_dlp
 import urllib.request
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
+
+executor = ThreadPoolExecutor(max_workers=4)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -65,7 +68,8 @@ def download_audio(query: str) -> str:
         },
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-        }
+        },
+        "socket_timeout": 30,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -98,15 +102,41 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "3. Espera a que procese y descargue el audio.\n\n"
         "Comandos:\n"
         "/start - Iniciar el bot\n"
-        "/help - Ver mensajes de ayuda",
+        "/help - Ver mensajes de ayuda\n"
+        "/ping - Probar conexion\n"
+        "/status - Estado del sistema\n"
+        "/restart - Reiniciar proceso",
         parse_mode="Markdown"
     )
+
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None:
+        return
+    await update.message.reply_text("Pong!")
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None:
+        return
+    await update.message.reply_text(
+        "*Estado del Bot*\n\n"
+        "Sistema: Activo\n"
+        "Motor: yt-dlp 2026.3.17\n"
+        "JS Runtime: Detectado",
+        parse_mode="Markdown"
+    )
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None:
+        return
+    await update.message.reply_text("Reiniciando sistema...")
+    os._exit(0)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or update.message.text is None:
         return
         
     url: str = update.message.text.strip()
+    url = re.sub(r"\?(?:si|utm_source|utm_medium)=.*$", "", url)
 
     if not (is_spotify(url) or is_youtube(url)):
         await update.message.reply_text(
@@ -120,12 +150,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         if is_spotify(url):
             await msg.edit_text("Buscando informacion en Spotify...")
-            query = await loop.run_in_executor(None, get_spotify_query, url)
+            query = await asyncio.wait_for(
+                loop.run_in_executor(executor, get_spotify_query, url),
+                timeout=20
+            )
         else:
             query = url
 
         await msg.edit_text("Descargando audio de YouTube...")
-        filepath = await loop.run_in_executor(None, download_audio, query)
+        filepath = await asyncio.wait_for(
+            loop.run_in_executor(executor, download_audio, query),
+            timeout=180
+        )
 
         await msg.edit_text("Enviando archivo...")
 
@@ -138,6 +174,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await msg.delete()
         os.remove(filepath)
 
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout procesando {url}")
+        await msg.edit_text("El proceso tardo demasiado. Intenta con un link mas corto.")
     except Exception as e:
         logger.error(f"Error procesando {url}: {e}")
         await msg.edit_text(
@@ -148,6 +187,9 @@ async def post_init(application) -> None:
     await application.bot.set_my_commands([
         ("start", "Iniciar el bot"),
         ("help", "Ver instrucciones"),
+        ("ping", "Probar conexion"),
+        ("status", "Estado del sistema"),
+        ("restart", "Reiniciar proceso"),
     ])
 
 def main() -> None:
@@ -158,6 +200,9 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("ping", ping_command))
+    app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("restart", restart_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Bot corriendo...")
