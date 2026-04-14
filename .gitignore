@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+*.mp3
+*.mp4
+*.webm
+
+test_bot.py
